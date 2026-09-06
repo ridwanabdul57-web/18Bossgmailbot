@@ -853,7 +853,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_normalized = unicodedata.normalize("NFKD", text)
     cleaned_text = "".join([c for c in text_normalized if not unicodedata.combining(c)])
     cleaned_text = cleaned_text.replace('\r', '').replace('\ufeff', '').replace('\u200b', '')
-    lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
+    
+    # PERBAIKAN: Memisahkan baris dan menyaring agar spasi/baris kosong tidak dihitung
+    raw_lines = cleaned_text.split('\n')
+    lines = [line.strip() for line in raw_lines if line.strip()]
 
     if current_mode == 'WAITING_USER_PASTE_REJECT':
         if user.id != ADMIN_CHAT_ID:
@@ -1037,8 +1040,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if clean_line:
                 items_to_process.append((clean_line, bulk_password_used))
 
-        # PEMBATASAN OTOMATIS MAKSIMAL 50 AKUN
-        if len(items_to_process) > MAX_BULK_LIMIT:
+        # PEMBATASAN OTOMATIS MAKSIMAL 50 AKUN (Baris kosong sudah disaring di awal)
+        total_input_count = len(items_to_process)
+        if total_input_count > MAX_BULK_LIMIT:
             items_to_process = items_to_process[:MAX_BULK_LIMIT]
 
     if items_to_process:
@@ -1114,10 +1118,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if duplicate_count > 0:
             msg_response += f"\n⚠️ `{duplicate_count}` akun ditolak otomatis karena sudah pernah dikirim sebelumnya."
 
-        if is_bulking_mode and len(lines) > MAX_BULK_LIMIT:
+        if is_bulking_mode and total_input_count > MAX_BULK_LIMIT:
             msg_response += (
                 f"\n\n📌 *Catatan Batas Bulking:*\n"
-                f"Teks yang Anda kirim berisi {len(lines)} akun. Bot secara otomatis memproses *{MAX_BULK_LIMIT} akun pertama* agar bot tidak macet.\n"
+                f"Teks yang Anda kirim berisi {total_input_count} akun valid. Bot secara otomatis memproses *{MAX_BULK_LIMIT} akun pertama* agar bot tidak macet.\n"
                 f"Silakan klik **📦 Setor Bulking** kembali untuk menyetor sisa akun berikutnya."
             )
 
