@@ -9,6 +9,7 @@ BOT_TOKEN = '8966364905:AAEJKwW7MFa7rV0oI53gtxKUZEiuTHp0_5M'
 ADMIN_CHAT_ID = 8359903974         # ID Telegram Akun Utama / Admin
 CS_USERNAME = 'bossgmailbotcs'    # Username CS Telegram
 HARGA_PER_GMAIL = 4000             # Rp 4.000 / akun
+MAX_BULK_LIMIT = 50                # Batas maksimal akun per sekali setor bulking
 
 # Daftar Password yang Diizinkan untuk Bulking
 ALLOWED_BULK_PASSWORDS = ['fineirga', 'sgsg1122', 'prabujaya']
@@ -45,7 +46,7 @@ def init_db():
             created_at TEXT
         )
     ''')
-
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,11 +115,12 @@ def back_keyboard():
 # ----------------- PESAN SAMBUTAN UTAMA -----------------
 def get_welcome_text(first_name):
     return (
-        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V26* ✨\n"
+        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V27* ✨\n"
         f"Halo *{first_name}*! Silakan baca informasi & aturan setoran di bawah ini:\n\n"
         f"💵 *INFORMASI RATE & PROSES*\n"
         f"• *Rate Per Akun:* Rp 4.000\n"
-        f"• *Estimasi Pengecekan:* 24 - 48 Jam Kerja\n\n"
+        f"• *Estimasi Pengecekan:* 24 - 48 Jam Kerja\n"
+        f"• *Batas Bulking:* Maksimal {MAX_BULK_LIMIT} akun / setor\n\n"
         f"🔑 *ATURAN KATA SANDI (PASSWORD)*\n"
         f"• Password yang valid: `fineirga`, `sgsg1122`, atau `prabujaya`\n\n"
         f"⚠️ *SYARAT & KETENTUAN WAJIB*\n"
@@ -191,7 +193,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pesan = (
             f"📦 *SETORAN BULKING AKTIF*\n"
             f"═══════════════════════\n"
-            f"🔑 *Password Dipilih:* `{chosen_password}`\n\n"
+            f"🔑 *Password Dipilih:* `{chosen_password}`\n"
+            f"⚠️ *Batas Maksimal:* {MAX_BULK_LIMIT} Akun sekali kirim\n\n"
             f"Sekarang, silakan *ketik atau paste daftar email saja* (satu email per baris) di bawah ini:\n\n"
             f"📌 *Contoh:*\n"
             f"`email1@gmail.com`\n"
@@ -1029,12 +1032,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 items_to_process.append((match.group(1).lower(), match.group(2)))
 
     elif is_bulking_mode:
-        gmail_pattern = r'^[a-zA-Z0-9._%+-]+@gmail\.com$'
-        
         for line in lines:
             clean_line = line.split(':')[0].strip() if ':' in line else line
-            if re.match(gmail_pattern, clean_line, re.IGNORECASE):
-                items_to_process.append((clean_line.lower(), bulk_password_used))
+            if clean_line:
+                items_to_process.append((clean_line, bulk_password_used))
+
+        # PEMBATASAN OTOMATIS MAKSIMAL 50 AKUN
+        if len(items_to_process) > MAX_BULK_LIMIT:
+            items_to_process = items_to_process[:MAX_BULK_LIMIT]
 
     if items_to_process:
         conn = sqlite3.connect('bot_database.db')
@@ -1109,6 +1114,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if duplicate_count > 0:
             msg_response += f"\n⚠️ `{duplicate_count}` akun ditolak otomatis karena sudah pernah dikirim sebelumnya."
 
+        if is_bulking_mode and len(lines) > MAX_BULK_LIMIT:
+            msg_response += (
+                f"\n\n📌 *Catatan Batas Bulking:*\n"
+                f"Teks yang Anda kirim berisi {len(lines)} akun. Bot secara otomatis memproses *{MAX_BULK_LIMIT} akun pertama* agar bot tidak macet.\n"
+                f"Silakan klik **📦 Setor Bulking** kembali untuk menyetor sisa akun berikutnya."
+            )
+
         await update.message.reply_text(
             msg_response,
             reply_markup=main_menu_keyboard(user.id),
@@ -1117,7 +1129,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             f"❌ *FORMAT / EMAIL TIDAK VALID!*\n\n"
-            f"Pastikan kamu mengirimkan daftar email dengan format `@gmail.com` yang benar per baris.",
+            f"Pastikan kamu mengirimkan format data yang benar.",
             reply_markup=cancel_keyboard(),
             parse_mode='Markdown'
         )
@@ -1134,5 +1146,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot Setoran V26 Aktif...")
+    print("Bot Setoran V27 Aktif...")
     app.run_polling()
