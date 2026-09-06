@@ -1,5 +1,6 @@
 import re
 import sqlite3
+import unicodedata
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -113,7 +114,7 @@ def back_keyboard():
 # ----------------- PESAN SAMBUTAN UTAMA -----------------
 def get_welcome_text(first_name):
     return (
-        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V25* ✨\n"
+        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V26* ✨\n"
         f"Halo *{first_name}*! Silakan baca informasi & aturan setoran di bawah ini:\n\n"
         f"💵 *INFORMASI RATE & PROSES*\n"
         f"• *Rate Per Akun:* Rp 4.000\n"
@@ -215,14 +216,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = cursor.fetchone()
         balance_ready = res[0] if res else 0
 
-        balance_pending = pen_count * HARGA_PER_GMAIL
         conn.close()
 
         pesan = (
             f"📊 *INFORMASI AKUN & SALDO*\n"
             f"═══════════════════════\n"
             f"💵 *Saldo Dapat Dicairkan:* Rp {balance_ready:,}\n"
-            f"⏳ *Saldo Tertahan (Pending):* Rp {balance_pending:,}\n"
+            f"⏳ *Saldo Tertahan (Pending):* Rp {pen_count * HARGA_PER_GMAIL:,}\n"
             f"═══════════════════════\n"
             f"✅ *Gmail Disetujui (Approved):* {app_count} Akun\n"
             f"⏳ *Gmail Menunggu (Pending):* {pen_count} Akun\n"
@@ -846,6 +846,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Pembersihan Total Karakter Tersembunyi Notepad & Windows (BOM, Spasi Tak Kelihatan, Carriage Return)
+    text_normalized = unicodedata.normalize("NFKD", text)
+    cleaned_text = "".join([c for c in text_normalized if not unicodedata.combining(c)])
+    cleaned_text = cleaned_text.replace('\r', '').replace('\ufeff', '').replace('\u200b', '')
+    lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
+
     if current_mode == 'WAITING_USER_PASTE_REJECT':
         if user.id != ADMIN_CHAT_ID:
             return
@@ -854,16 +860,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reason_idx = context.user_data.get('paste_reject_reason_idx', 0)
         chosen_reason = REJECT_REASONS[reason_idx] if reason_idx < len(REJECT_REASONS) else "Ditolak Admin"
 
-        # Diperbarui menggunakan splitlines() agar aman dari karakter enter Notepad
-        lines = [line.strip().lower() for line in text.splitlines() if line.strip()]
         emails_to_reject = []
         for line in lines:
-            if ':' in line:
-                part = line.split(':')[0].strip()
+            line_lower = line.lower()
+            if ':' in line_lower:
+                part = line_lower.split(':')[0].strip()
                 if '@gmail.com' in part:
                     emails_to_reject.append(part)
-            elif '@gmail.com' in line:
-                emails_to_reject.append(line)
+            elif '@gmail.com' in line_lower:
+                emails_to_reject.append(line_lower)
 
         if not emails_to_reject:
             await update.message.reply_text(
@@ -1012,8 +1017,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Diperbarui menggunakan splitlines() agar aman dari karakter enter Notepad
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
     items_to_process = []
     is_bulking_mode = (current_mode == 'BULKING_INPUT_EMAILS')
     bulk_password_used = context.user_data.get('bulk_password') if is_bulking_mode else None
@@ -1131,5 +1134,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot Setoran V25 Aktif...")
+    print("Bot Setoran V26 Aktif...")
     app.run_polling()
