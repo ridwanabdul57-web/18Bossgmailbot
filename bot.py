@@ -113,7 +113,7 @@ def back_keyboard():
 # ----------------- PESAN SAMBUTAN UTAMA -----------------
 def get_welcome_text(first_name):
     return (
-        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V24* ✨\n"
+        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V25* ✨\n"
         f"Halo *{first_name}*! Silakan baca informasi & aturan setoran di bawah ini:\n\n"
         f"💵 *INFORMASI RATE & PROSES*\n"
         f"• *Rate Per Akun:* Rp 4.000\n"
@@ -854,7 +854,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reason_idx = context.user_data.get('paste_reject_reason_idx', 0)
         chosen_reason = REJECT_REASONS[reason_idx] if reason_idx < len(REJECT_REASONS) else "Ditolak Admin"
 
-        lines = [line.strip().lower() for line in text.split('\n') if line.strip()]
+        # Diperbarui menggunakan splitlines() agar aman dari karakter enter Notepad
+        lines = [line.strip().lower() for line in text.splitlines() if line.strip()]
         emails_to_reject = []
         for line in lines:
             if ':' in line:
@@ -1011,7 +1012,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    # Diperbarui menggunakan splitlines() agar aman dari karakter enter Notepad
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     items_to_process = []
     is_bulking_mode = (current_mode == 'BULKING_INPUT_EMAILS')
     bulk_password_used = context.user_data.get('bulk_password') if is_bulking_mode else None
@@ -1129,5 +1131,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot Setoran V24 Aktif...")
+    print("Bot Setoran V25 Aktif...")
     app.run_polling()
