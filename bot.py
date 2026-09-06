@@ -115,7 +115,7 @@ def back_keyboard():
 # ----------------- PESAN SAMBUTAN UTAMA -----------------
 def get_welcome_text(first_name):
     return (
-        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V27* ✨\n"
+        f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V28* ✨\n"
         f"Halo *{first_name}*! Silakan baca informasi & aturan setoran di bawah ini:\n\n"
         f"💵 *INFORMASI RATE & PROSES*\n"
         f"• *Rate Per Akun:* Rp 4.000\n"
@@ -195,12 +195,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"═══════════════════════\n"
             f"🔑 *Password Dipilih:* `{chosen_password}`\n"
             f"⚠️ *Batas Maksimal:* {MAX_BULK_LIMIT} Akun sekali kirim\n\n"
-            f"Sekarang, silakan *ketik atau paste daftar email saja* (satu email per baris) di bawah ini:\n\n"
-            f"📌 *Contoh:*\n"
+            f"Sekarang, silakan *ketik atau paste daftar list gmail* dengan format awal (`email@gmail.com` atau `email@gmail.com:password`) di bawah ini (satu per baris):\n\n"
+            f"📌 *Contoh Format:*\n"
             f"`email1@gmail.com`\n"
-            f"`email2@gmail.com`\n"
-            f"`email3@gmail.com`\n\n"
-            f"_Sistem sedang menunggu daftar email kamu..._"
+            f"`email2@gmail.com`\n\n"
+            f"_Sistem sedang menunggu list kamu..._"
         )
         await query.edit_message_text(pesan, reply_markup=cancel_keyboard(), parse_mode='Markdown')
 
@@ -854,7 +853,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cleaned_text = "".join([c for c in text_normalized if not unicodedata.combining(c)])
     cleaned_text = cleaned_text.replace('\r', '').replace('\ufeff', '').replace('\u200b', '')
     
-    # PERBAIKAN: Memisahkan baris dan menyaring agar spasi/baris kosong tidak dihitung
     raw_lines = cleaned_text.split('\n')
     lines = [line.strip() for line in raw_lines if line.strip()]
 
@@ -1036,11 +1034,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif is_bulking_mode:
         for line in lines:
-            clean_line = line.split(':')[0].strip() if ':' in line else line
-            if clean_line:
-                items_to_process.append((clean_line, bulk_password_used))
+            line_clean = line.strip()
+            # Mendukung format mentah email@gmail.com ataupun email@gmail.com:password
+            if '@gmail.com' in line_clean.lower():
+                if ':' in line_clean:
+                    extracted_email = line_clean.split(':')[0].strip().lower()
+                else:
+                    extracted_email = line_clean.lower()
+                
+                if extracted_email.endswith('@gmail.com'):
+                    items_to_process.append((extracted_email, bulk_password_used))
 
-        # PEMBATASAN OTOMATIS MAKSIMAL 50 AKUN (Baris kosong sudah disaring di awal)
         total_input_count = len(items_to_process)
         if total_input_count > MAX_BULK_LIMIT:
             items_to_process = items_to_process[:MAX_BULK_LIMIT]
@@ -1131,9 +1135,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     else:
+        # Keterangan error format salah disertai arahan wajib cek netnit.net & quick fix issue serta status wajib GOOD
+        error_msg = (
+            f"❌ *FORMAT LIST / AKUN TIDAK VALID!*\n\n"
+            f"⚠️ Pastikan format list gmail Anda benar (`email@gmail.com`).\n\n"
+            f"🌐 Silakan cek terlebih dahulu di web *netnit.net*:\n"
+            f"1. Masuk dan lakukan **Quick Fix Issue** pada akun Anda.\n"
+            f"2. Pastikan status akun di sana sudah **Wajib GOOD semua** sebelum disetor ulang ke bot ini!"
+        )
         await update.message.reply_text(
-            f"❌ *FORMAT / EMAIL TIDAK VALID!*\n\n"
-            f"Pastikan kamu mengirimkan format data yang benar.",
+            error_msg,
             reply_markup=cancel_keyboard(),
             parse_mode='Markdown'
         )
@@ -1150,5 +1161,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot Setoran V27 Aktif...")
+    print("Bot Setoran V28 Aktif...")
     app.run_polling()
