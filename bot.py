@@ -1115,7 +1115,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
         # =========================================================================
-        # PERBAIKAN: Pengiriman file .txt dipindahkan KELUAR dari perulangan loop database
+        # PERBAIKAN: Mengirim file .txt kumulatif akun pending user ke admin
         # =========================================================================
         if inserted_count > 0:
             username_txt = f"@{user.username}" if user.username else "No Username"
