@@ -1114,6 +1114,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         context.user_data.clear()
 
+        # =========================================================================
+        # PERBAIKAN: Pengiriman file .txt dipindahkan KELUAR dari perulangan loop database
+        # =========================================================================
         if inserted_count > 0:
             username_txt = f"@{user.username}" if user.username else "No Username"
             mode_label = "BULKING" if is_bulking_mode else "SATUAN"
@@ -1121,7 +1124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Ambil seluruh akun pending milik user ini untuk dikompilasi ke dalam file txt personal kumulatif
             conn = get_db()
             cursor = conn.cursor()
-            cursor.execute('SELECT gmail, password FROM deposits WHERE user_id = %s AND status = \'PENDING\'', (user.id,))
+            cursor.execute("SELECT gmail, password FROM deposits WHERE user_id = %s AND status = 'PENDING'", (user.id,))
             all_pending_user_accounts = cursor.fetchall()
             cursor.close()
             conn.close()
@@ -1152,8 +1155,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Buka Panel Admin", callback_data="admin_panel")]]),
                     parse_mode='Markdown'
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Gagal mengirim dokumen setoran ke admin: {e}")
         
         msg_response = ""
         if inserted_count > 0:
