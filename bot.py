@@ -8,16 +8,14 @@ from psycopg2.extras import RealDictCursor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-BOT_TOKEN = '8966364905:AAEJKwW7MFa7rV0oI53gtxKUZEiuTHp0_5M'
-ADMIN_CHAT_ID = 8359903974         # ID Telegram Akun Utama / Admin
-CS_USERNAME = 'bossgmailbotcs'    # Username CS Telegram
-HARGA_PER_GMAIL = 4000             # Rp 4.000 / akun
-MAX_BULK_LIMIT = 50                # Batas maksimal akun per sekali setor bulking
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8966364905:AAEJKwW7MFa7rV0oI53gtxKUZEiuTHp0_5M')
+ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', 8359903974))
+CS_USERNAME = 'bossgmailbotcs'
+HARGA_PER_GMAIL = 4000
+MAX_BULK_LIMIT = 50
 
-# Daftar Password yang Diizinkan untuk Bulking
 ALLOWED_BULK_PASSWORDS = ['fineirga', 'sgsg1122', 'prabujaya']
 
-# Daftar Alasan Reject untuk Admin
 REJECT_REASONS = [
     "Password Salah / Tidak Sesuai Rules",
     "Akun Terkena Bug / Captcha",
@@ -26,14 +24,12 @@ REJECT_REASONS = [
     "Format / Data Akun Tidak Valid"
 ]
 
-# Mengambil DATABASE_URL dari Environment Variables
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-# ----------------- DATABASE SETUP & MIGRATION PERMANEN (POSTGRESQL) -----------------
+# ----------------- DATABASE SETUP -----------------
 def get_db():
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL tidak ditemukan pada Environment Variables!")
-    # Menghubungkan ke PostgreSQL
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
@@ -41,7 +37,6 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
     
-    # Tabel Users
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -50,7 +45,6 @@ def init_db():
         )
     ''')
     
-    # Tabel Deposits
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS deposits (
             id SERIAL PRIMARY KEY,
@@ -62,7 +56,6 @@ def init_db():
         )
     ''')
     
-    # Tabel Withdrawals
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS withdrawals (
             id SERIAL PRIMARY KEY,
@@ -76,7 +69,6 @@ def init_db():
         )
     ''')
 
-    # Indeks agar query riwayat & pencarian user berjalan cepat & stabil
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_dep_user ON deposits(user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_wd_user ON withdrawals(user_id)")
         
@@ -84,7 +76,6 @@ def init_db():
     cursor.close()
     conn.close()
 
-# Jalankan Inisialisasi Database PostgreSQL
 init_db()
 
 # ----------------- KEYBOARD MENUS -----------------
@@ -124,7 +115,6 @@ def cancel_keyboard():
 def back_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("« Kembali ke Menu Utama", callback_data="menu_utama")]])
 
-# ----------------- PESAN SAMBUTAN UTAMA -----------------
 def get_welcome_text(first_name):
     return (
         f"✨ *SELAMAT DATANG DI BOT SETORAN GMAIL V28* ✨\n"
@@ -877,7 +867,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Pembersihan Total Karakter Tersembunyi
     text_normalized = unicodedata.normalize("NFKD", text)
     cleaned_text = "".join([c for c in text_normalized if not unicodedata.combining(c)])
     cleaned_text = cleaned_text.replace('\r', '').replace('\ufeff', '').replace('\u200b', '')
