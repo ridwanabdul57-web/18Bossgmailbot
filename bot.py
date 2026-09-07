@@ -1,3 +1,4 @@
+import io
 import re
 import sqlite3
 import unicodedata
@@ -848,7 +849,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Pembersihan Total Karakter Tersembunyi Notepad & Windows (BOM, Spasi Tak Kelihatan, Carriage Return)
+    # Pembersihan Total Karakter Tersembunyi
     text_normalized = unicodedata.normalize("NFKD", text)
     cleaned_text = "".join([c for c in text_normalized if not unicodedata.combining(c)])
     cleaned_text = cleaned_text.replace('\r', '').replace('\ufeff', '').replace('\u200b', '')
@@ -1035,7 +1036,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif is_bulking_mode:
         for line in lines:
             line_clean = line.strip()
-            # Mendukung format mentah email@gmail.com ataupun email@gmail.com:password
             if '@gmail.com' in line_clean.lower():
                 if ':' in line_clean:
                     extracted_email = line_clean.split(':')[0].strip().lower()
@@ -1056,7 +1056,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         inserted_count = 0
         duplicate_count = 0
-        successfully_inserted_emails = []
+        successfully_inserted_accounts = []
 
         for gmail, password in items_to_process:
             cursor.execute('SELECT id FROM deposits WHERE gmail = ?', (gmail,))
@@ -1069,44 +1069,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute('INSERT INTO deposits (user_id, gmail, password, created_at) VALUES (?, ?, ?, ?)', (user.id, gmail, password, now_str))
             conn.commit()
             inserted_count += 1
-            successfully_inserted_emails.append(gmail)
+            successfully_inserted_accounts.append((gmail, password))
 
         conn.close()
         context.user_data.clear()
 
         if inserted_count > 0:
             username_txt = f"@{user.username}" if user.username else "No Username"
+            mode_label = "BULKING" if is_bulking_mode else "SATUAN"
             
-            if is_bulking_mode and bulk_password_used:
-                emails_formatted = "\n".join([f"`{e}`" for e in successfully_inserted_emails])
-                laporan_admin = (
-                    f"📥 *SETORAN BULKING BARU MASUK*\n"
-                    f"═══════════════════════\n"
-                    f"👤 *User:* {user.first_name} ({username_txt})\n"
-                    f"🆔 *ID User:* `{user.id}`\n"
-                    f"🔑 *Password:* `{bulk_password_used}`\n"
-                    f"📦 *Jumlah Akun:* `{inserted_count}` Akun Gmail\n"
-                    f"═══════════════════════\n"
-                    f"📋 *Daftar Email:*\n{emails_formatted}\n"
-                    f"═══════════════════════\n"
-                    f"Silakan buka *Panel Admin* untuk mengelola setoran user ini."
-                )
-            else:
-                laporan_admin = (
-                    f"📥 *SETORAN SATUAN BARU MASUK*\n"
-                    f"═══════════════════════\n"
-                    f"👤 *User:* {user.first_name} ({username_txt})\n"
-                    f"🆔 *ID User:* `{user.id}`\n"
-                    f"📦 *Jumlah Akun:* `{inserted_count}` Akun Gmail\n"
-                    f"═══════════════════════\n"
-                    f"Silakan buka *Panel Admin* untuk mengelola setoran user ini."
-                )
+            # 1. Teks Notifikasi Pesan Singkat
+            laporan_admin_text = (
+                f"📥 *SETORAN {mode_label} BARU MASUK*\n"
+                f"═══════════════════════\n"
+                f"👤 *User:* {user.first_name} ({username_txt})\n"
+                f"🆔 *ID User:* `{user.id}`\n"
+                f"📦 *Jumlah Akun:* `{inserted_count}` Akun Gmail\n"
+                f"═══════════════════════\n"
+                f"📄 *Data akun dikirim dalam bentuk file .txt di bawah ini.*"
+            )
+
+            # 2. Pembuatan File .txt dalam Memory
+            txt_content = "\n".join([f"{g}:{p}" for g, p in successfully_inserted_accounts])
+            txt_file = io.BytesIO(txt_content.encode('utf-8'))
+            
+            timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{mode_label}_{user.id}_{timestamp_file}.txt"
 
             try:
-                await context.bot.send_message(
+                # Kirim dokumen .txt beserta caption dan tombol ke Telegram Admin
+                await context.bot.send_document(
                     chat_id=ADMIN_CHAT_ID,
-                    text=laporan_admin,
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Buka Panel Admin", callback_data="admin_panel")]]),
+                    document=txt_file,
+                    filename=filename,
+                    caption=laporan_admin_text,
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Buka Panel Admin", callback_data="admin_panel")]),
                     parse_mode='Markdown'
                 )
             except Exception:
@@ -1135,7 +1132,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     else:
-        # Keterangan error format salah disertai arahan wajib cek netnit.net & quick fix issue serta status wajib GOOD
         error_msg = (
             f"❌ *FORMAT LIST / AKUN TIDAK VALID!*\n\n"
             f"⚠️ Pastikan format list gmail Anda benar (`email@gmail.com`).\n\n"
