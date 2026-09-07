@@ -1,8 +1,10 @@
-#import io
+import io
+import os
 import re
-import sqlite3
 import unicodedata
 from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -24,12 +26,15 @@ REJECT_REASONS = [
     "Format / Data Akun Tidak Valid"
 ]
 
-DB_NAME = 'bot_database.db'
+# Mengambil DATABASE_URL dari Environment Variables
+DATABASE_URL = os.getenv('DATABASE_URL')
 
-# ----------------- DATABASE SETUP & MIGRATION PERMANEN -----------------
+# ----------------- DATABASE SETUP & MIGRATION PERMANEN (POSTGRESQL) -----------------
 def get_db():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")  # Memastikan data langsung tersimpan ke disk (Anti Loss)
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL tidak ditemukan pada Environment Variables!")
+    # Menghubungkan ke PostgreSQL
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 def init_db():
@@ -39,17 +44,17 @@ def init_db():
     # Tabel Users
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
+            user_id BIGINT PRIMARY KEY,
             username TEXT,
-            balance INTEGER DEFAULT 0
+            balance BIGINT DEFAULT 0
         )
     ''')
     
     # Tabel Deposits
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS deposits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
             gmail TEXT UNIQUE,
             password TEXT,
             status TEXT DEFAULT 'PENDING',
@@ -60,9 +65,9 @@ def init_db():
     # Tabel Withdrawals
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS withdrawals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            nominal INTEGER,
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            nominal BIGINT,
             metode TEXT,
             rekening TEXT,
             atas_nama TEXT,
@@ -70,26 +75,16 @@ def init_db():
             created_at TEXT
         )
     ''')
-    
-    # Pengecekan Migrasi Kolom Aman
-    cursor.execute("PRAGMA table_info(deposits)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'created_at' not in columns:
-        cursor.execute("ALTER TABLE deposits ADD COLUMN created_at TEXT")
-
-    cursor.execute("PRAGMA table_info(withdrawals)")
-    wd_columns = [column[1] for column in cursor.fetchall()]
-    if 'atas_nama' not in wd_columns:
-        cursor.execute("ALTER TABLE withdrawals ADD COLUMN atas_nama TEXT")
 
     # Indeks agar query riwayat & pencarian user berjalan cepat & stabil
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_dep_user ON deposits(user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_wd_user ON withdrawals(user_id)")
         
     conn.commit()
+    cursor.close()
     conn.close()
 
-# Jalankan Inisialisasi Database
+# Jalankan Inisialisasi Database PostgreSQL
 init_db()
 
 # ----------------- KEYBOARD MENUS -----------------
@@ -154,8 +149,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user.id, user.username))
+    cursor.execute('INSERT INTO users (user_id, username) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING', (user.id, user.username))
     conn.commit()
+    cursor.close()
     conn.close()
 
     await update.message.reply_text("Papan menu cepat diaktifkan di bawah 👇", reply_markup=persistent_reply_keyboard())
@@ -225,16 +221,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         cursor = conn.cursor()
         
-        cursor.execute('SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = "APPROVED"', (user.id,))
+        cursor.execute("SELECT COUNT(*) FROM deposits WHERE user_id = %s AND status = 'APPROVED'", (user.id,))
         app_count = cursor.fetchone()[0]
 
-        cursor.execute('SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = "PENDING"', (user.id,))
+        cursor.execute("SELECT COUNT(*) FROM deposits WHERE user_id = %s AND status = 'PENDING'", (user.id,))
         pen_count = cursor.fetchone()[0]
 
-        cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user.id,))
+        cursor.execute('SELECT balance FROM users WHERE user_id = %s', (user.id,))
         res = cursor.fetchone()
         balance_ready = res[0] if res else 0
 
+        cursor.close()
         conn.close()
 
         pesan = (
@@ -253,8 +250,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = ? ORDER BY id DESC LIMIT 15', (user.id,))
+        cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = %s ORDER BY id DESC LIMIT 15', (user.id,))
         items = cursor.fetchall()
+        cursor.close()
         conn.close()
 
         if not items:
@@ -277,8 +275,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT id, nominal, metode, rekening, atas_nama, status, created_at FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 10', (user.id,))
+        cursor.execute('SELECT id, nominal, metode, rekening, atas_nama, status, created_at FROM withdrawals WHERE user_id = %s ORDER BY id DESC LIMIT 10', (user.id,))
         wd_items = cursor.fetchall()
+        cursor.close()
         conn.close()
 
         if not wd_items:
@@ -309,9 +308,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user.id,))
+        cursor.execute('SELECT balance FROM users WHERE user_id = %s', (user.id,))
         res = cursor.fetchone()
         balance = res[0] if res else 0
+        cursor.close()
         conn.close()
 
         if balance < HARGA_PER_GMAIL:
@@ -401,10 +401,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             SELECT deposits.user_id, users.username, COUNT(*) 
             FROM deposits 
             LEFT JOIN users ON deposits.user_id = users.user_id 
-            WHERE deposits.status = "PENDING" 
-            GROUP BY deposits.user_id
+            WHERE deposits.status = 'PENDING' 
+            GROUP BY deposits.user_id, users.username
         ''')
         user_list = cursor.fetchall()
+        cursor.close()
         conn.close()
 
         if not user_list:
@@ -436,10 +437,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             SELECT w.id, w.user_id, u.username, w.nominal, w.metode, w.rekening, w.atas_nama, w.created_at 
             FROM withdrawals w 
             LEFT JOIN users u ON w.user_id = u.user_id 
-            WHERE w.status = "PENDING" 
+            WHERE w.status = 'PENDING' 
             ORDER BY w.id DESC
         ''')
         wd_list = cursor.fetchall()
+        cursor.close()
         conn.close()
 
         if not wd_list:
@@ -550,8 +552,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT id FROM deposits WHERE user_id = ? AND status = "PENDING"', (target_uid,))
+        cursor.execute("SELECT id FROM deposits WHERE user_id = %s AND status = 'PENDING'", (target_uid,))
         all_items = [row[0] for row in cursor.fetchall()]
+        cursor.close()
         conn.close()
 
         selected_deps = context.user_data.setdefault('selected_deps', [])
@@ -577,13 +580,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         cursor = conn.cursor()
         
-        placeholders = ','.join(['?'] * len(selected_deps))
-        cursor.execute(f'UPDATE deposits SET status = "APPROVED" WHERE id IN ({placeholders})', selected_deps)
+        placeholders = ','.join(['%s'] * len(selected_deps))
+        cursor.execute(f"UPDATE deposits SET status = 'APPROVED' WHERE id IN ({placeholders})", tuple(selected_deps))
         
         count = len(selected_deps)
         total_added = count * HARGA_PER_GMAIL
-        cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', (total_added, target_uid))
+        cursor.execute('UPDATE users SET balance = balance + %s WHERE user_id = %s', (total_added, target_uid))
         conn.commit()
+        cursor.close()
         conn.close()
 
         context.user_data['selected_deps'] = []
@@ -638,12 +642,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         cursor = conn.cursor()
         
-        placeholders = ','.join(['?'] * len(selected_deps))
-        cursor.execute(f'SELECT gmail FROM deposits WHERE id IN ({placeholders})', selected_deps)
+        placeholders = ','.join(['%s'] * len(selected_deps))
+        cursor.execute(f'SELECT gmail FROM deposits WHERE id IN ({placeholders})', tuple(selected_deps))
         rejected_emails = [row[0] for row in cursor.fetchall()]
 
-        cursor.execute(f'UPDATE deposits SET status = "REJECTED" WHERE id IN ({placeholders})', selected_deps)
+        cursor.execute(f"UPDATE deposits SET status = 'REJECTED' WHERE id IN ({placeholders})", tuple(selected_deps))
         conn.commit()
+        cursor.close()
         conn.close()
 
         count = len(selected_deps)
@@ -681,17 +686,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wd_id = int(data.split('_')[1])
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT user_id, nominal, metode, rekening, atas_nama, status FROM withdrawals WHERE id = ?', (wd_id,))
+        cursor.execute('SELECT user_id, nominal, metode, rekening, atas_nama, status FROM withdrawals WHERE id = %s', (wd_id,))
         res = cursor.fetchone()
 
         if not res or res[5] != 'PENDING':
             await query.edit_message_text("⚠️ Penarikan ini sudah diproses.", reply_markup=back_keyboard())
+            cursor.close()
             conn.close()
             return
 
         target_uid, nominal, metode, rekening, atas_nama, _ = res
-        cursor.execute('UPDATE withdrawals SET status = "APPROVED" WHERE id = ?', (wd_id,))
+        cursor.execute("UPDATE withdrawals SET status = 'APPROVED' WHERE id = %s", (wd_id,))
         conn.commit()
+        cursor.close()
         conn.close()
 
         await query.edit_message_text(
@@ -727,18 +734,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wd_id = int(data.split('_')[1])
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT user_id, nominal, metode, rekening, atas_nama, status FROM withdrawals WHERE id = ?', (wd_id,))
+        cursor.execute('SELECT user_id, nominal, metode, rekening, atas_nama, status FROM withdrawals WHERE id = %s', (wd_id,))
         res = cursor.fetchone()
 
         if not res or res[5] != 'PENDING':
             await query.edit_message_text("⚠️ Penarikan ini sudah diproses.", reply_markup=back_keyboard())
+            cursor.close()
             conn.close()
             return
 
         target_uid, nominal, metode, rekening, atas_nama, _ = res
-        cursor.execute('UPDATE withdrawals SET status = "REJECTED" WHERE id = ?', (wd_id,))
-        cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', (nominal, target_uid))
+        cursor.execute("UPDATE withdrawals SET status = 'REJECTED' WHERE id = %s", (wd_id,))
+        cursor.execute('UPDATE users SET balance = balance + %s WHERE user_id = %s', (nominal, target_uid))
         conn.commit()
+        cursor.close()
         conn.close()
 
         await query.edit_message_text(
@@ -770,8 +779,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def render_admin_user_deposits(query, target_uid, context):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, gmail, password, created_at FROM deposits WHERE user_id = ? AND status = "PENDING"', (target_uid,))
+    cursor.execute("SELECT id, gmail, password, created_at FROM deposits WHERE user_id = %s AND status = 'PENDING'", (target_uid,))
     items = cursor.fetchall()
+    cursor.close()
     conn.close()
 
     if not items:
@@ -814,8 +824,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "📜 Daftar Setoran Saya":
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = ? ORDER BY id DESC LIMIT 15', (user.id,))
+        cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = %s ORDER BY id DESC LIMIT 15', (user.id,))
         items = cursor.fetchall()
+        cursor.close()
         conn.close()
 
         if not items:
@@ -837,13 +848,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "💰 Cek Saldo":
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = "APPROVED"', (user.id,))
+        cursor.execute("SELECT COUNT(*) FROM deposits WHERE user_id = %s AND status = 'APPROVED'", (user.id,))
         app_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = "PENDING"', (user.id,))
+        cursor.execute("SELECT COUNT(*) FROM deposits WHERE user_id = %s AND status = 'PENDING'", (user.id,))
         pen_count = cursor.fetchone()[0]
-        cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user.id,))
+        cursor.execute('SELECT balance FROM users WHERE user_id = %s', (user.id,))
         res = cursor.fetchone()
         balance_ready = res[0] if res else 0
+        cursor.close()
         conn.close()
 
         pesan = (
@@ -907,18 +919,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         actually_rejected_emails = []
 
         for email in emails_to_reject:
-            cursor.execute('SELECT id FROM deposits WHERE user_id = ? AND gmail = ? AND status = "PENDING"', (target_uid, email))
+            cursor.execute("SELECT id FROM deposits WHERE user_id = %s AND gmail = %s AND status = 'PENDING'", (target_uid, email))
             row = cursor.fetchone()
             
             if row:
                 dep_id = row[0]
-                cursor.execute('UPDATE deposits SET status = "REJECTED" WHERE id = ?', (dep_id,))
+                cursor.execute("UPDATE deposits SET status = 'REJECTED' WHERE id = %s", (dep_id,))
                 success_count += 1
                 actually_rejected_emails.append(email)
             else:
                 not_found_count += 1
 
         conn.commit()
+        cursor.close()
         conn.close()
 
         if actually_rejected_emails:
@@ -972,22 +985,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user.id,))
+        cursor.execute('SELECT balance FROM users WHERE user_id = %s', (user.id,))
         res = cursor.fetchone()
         balance = res[0] if res else 0
 
         if balance < nominal:
             await update.message.reply_text("❌ Saldo tidak mencukupi untuk melakukan penarikan ini.", reply_markup=main_menu_keyboard(user.id))
             context.user_data.clear()
+            cursor.close()
             conn.close()
             return
 
         now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S WIB")
-        cursor.execute('UPDATE users SET balance = balance - ? WHERE user_id = ?', (nominal, user.id))
-        cursor.execute('INSERT INTO withdrawals (user_id, nominal, metode, rekening, atas_nama, created_at) VALUES (?, ?, ?, ?, ?, ?)', 
+        cursor.execute('UPDATE users SET balance = balance - %s WHERE user_id = %s', (nominal, user.id))
+        cursor.execute('INSERT INTO withdrawals (user_id, nominal, metode, rekening, atas_nama, created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id', 
                        (user.id, nominal, metode, rekening, atas_nama, now_str))
-        wd_id = cursor.lastrowid
+        wd_id = cursor.fetchone()[0]
         conn.commit()
+        cursor.close()
         conn.close()
 
         username_txt = f"@{user.username}" if user.username else "No Username"
@@ -1068,25 +1083,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if items_to_process:
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user.id, user.username))
+        cursor.execute('INSERT INTO users (user_id, username) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING', (user.id, user.username))
         
         inserted_count = 0
         duplicate_count = 0
         successfully_inserted_accounts = []
 
         for gmail, password in items_to_process:
-            cursor.execute('SELECT id FROM deposits WHERE gmail = ?', (gmail,))
+            cursor.execute('SELECT id FROM deposits WHERE gmail = %s', (gmail,))
             if cursor.fetchone():
                 duplicate_count += 1
                 continue
 
             now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S WIB")
 
-            cursor.execute('INSERT INTO deposits (user_id, gmail, password, created_at) VALUES (?, ?, ?, ?)', (user.id, gmail, password, now_str))
+            cursor.execute('INSERT INTO deposits (user_id, gmail, password, created_at) VALUES (%s, %s, %s, %s)', (user.id, gmail, password, now_str))
             conn.commit()
             inserted_count += 1
             successfully_inserted_accounts.append((gmail, password))
 
+        cursor.close()
         conn.close()
         context.user_data.clear()
 
@@ -1170,5 +1186,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot Setoran V28 Aktif...")
+    print("Bot Setoran V28 Aktif (PostgreSQL Mode)...")
     app.run_polling()
