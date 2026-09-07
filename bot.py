@@ -28,9 +28,10 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 # ----------------- DATABASE SETUP -----------------
 def get_db():
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL tidak ditemukan pada Environment Variables!")
-    conn = psycopg2.connect(DATABASE_URL)
+    db_url = os.getenv('DATABASE_URL')
+    if not db_url:
+        raise ValueError("DATABASE_URL belum diisi di Variable Environment Railway!")
+    conn = psycopg2.connect(db_url)
     return conn
 
 def init_db():
@@ -75,8 +76,6 @@ def init_db():
     conn.commit()
     cursor.close()
     conn.close()
-
-init_db()
 
 # ----------------- KEYBOARD MENUS -----------------
 def persistent_reply_keyboard():
@@ -1164,6 +1163,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def post_init(application):
+    # Inisialisasi tabel database saat bot baru di-start secara aman
+    init_db()
     await application.bot.set_my_commands([
         BotCommand("start", "🔄 Tampilkan Menu Utama / Refresh Bot")
     ])
