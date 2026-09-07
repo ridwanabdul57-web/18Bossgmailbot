@@ -4,7 +4,6 @@ import re
 import unicodedata
 from datetime import datetime
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -165,7 +164,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pesan = (
             "⏳ *MODE SETORAN SATUAN AKTIF*\n"
             "═══════════════════════\n"
-            "Silakan ketik dan kirimkan data Gmail kamu sekarang.\n\n"
+            "Silakan ketik, kirim data Gmail kamu, atau kirim file `.txt` sekarang.\n\n"
             "📌 *Format:* `email@gmail.com:password`\n"
             "💡 *Password Wajib:* `fineirga` / `sgsg1122` / `prabujaya`\n"
             "💡 *Contoh:* `ridwan123@gmail.com:fineirga`\n\n"
@@ -197,7 +196,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"═══════════════════════\n"
             f"🔑 *Password Dipilih:* `{chosen_password}`\n"
             f"⚠️ *Batas Maksimal:* {MAX_BULK_LIMIT} Akun sekali kirim\n\n"
-            f"Sekarang, silakan *ketik atau paste daftar list gmail* dengan format awal (`email@gmail.com` atau `email@gmail.com:password`) di bawah ini (satu per baris):\n\n"
+            f"Sekarang, silakan *ketik, paste daftar list gmail*, atau *kirim file .txt* dengan format awal (`email@gmail.com` atau `email@gmail.com:password`) di bawah ini (satu per baris):\n\n"
             f"📌 *Contoh Format:*\n"
             f"`email1@gmail.com`\n"
             f"`email2@gmail.com`\n\n"
@@ -803,14 +802,35 @@ async def render_admin_user_deposits(query, target_uid, context):
         pass
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
     user = update.message.from_user
     current_mode = context.user_data.get('mode')
 
-    if text in ["🔄 Refresh / Start", "/start"]:
+    # Cek apakah user mengirim dokumen (.txt) atau teks biasa
+    raw_input_text = ""
+    is_document_upload = False
+
+    if update.message.document:
+        doc = update.message.document
+        if doc.file_name and doc.file_name.lower().endswith('.txt'):
+            is_document_upload = True
+            file_obj = await context.bot.get_file(doc.file_id)
+            file_bytes = await file_obj.download_as_bytearray()
+            try:
+                raw_input_text = file_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                raw_input_text = file_bytes.decode('latin-1', errors='ignore')
+        else:
+            await update.message.reply_text("❌ Mohon kirimkan file dengan format `.txt`.", reply_markup=cancel_keyboard())
+            return
+    elif update.message.text:
+        raw_input_text = update.message.text.strip()
+
+    text = raw_input_text.strip()
+
+    if not is_document_upload and text in ["🔄 Refresh / Start", "/start"]:
         await start(update, context)
         return
-    elif text == "📜 Daftar Setoran Saya":
+    elif not is_document_upload and text == "📜 Daftar Setoran Saya":
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = %s ORDER BY id DESC LIMIT 15', (user.id,))
@@ -834,7 +854,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(pesan, reply_markup=back_keyboard(), parse_mode='Markdown')
         return
-    elif text == "💰 Cek Saldo":
+    elif not is_document_upload and text == "💰 Cek Saldo":
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM deposits WHERE user_id = %s AND status = 'APPROVED'", (user.id,))
@@ -859,7 +879,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(pesan, reply_markup=back_keyboard(), parse_mode='Markdown')
         return
-    elif text == "💬 Hubungi CS":
+    elif not is_document_upload and text == "💬 Hubungi CS":
         await update.message.reply_text(
             f"💬 Silakan hubungi Customer Service kami di: @{CS_USERNAME}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Chat CS Sekarang", url=f"https://t.me/{CS_USERNAME}")]])
@@ -1098,21 +1118,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             username_txt = f"@{user.username}" if user.username else "No Username"
             mode_label = "BULKING" if is_bulking_mode else "SATUAN"
             
+            # Ambil seluruh akun pending milik user ini untuk dikompilasi ke dalam file txt personal kumulatif
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('SELECT gmail, password FROM deposits WHERE user_id = %s AND status = \'PENDING\'', (user.id,))
+            all_pending_user_accounts = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
             laporan_admin_text = (
-                f"📥 *SETORAN {mode_label} BARU MASUK*\n"
+                f"📥 *SETORAN {mode_label} BARU MASUK (AKUMULASI)*\n"
                 f"═══════════════════════\n"
                 f"👤 *User:* {user.first_name} ({username_txt})\n"
                 f"🆔 *ID User:* `{user.id}`\n"
-                f"📦 *Jumlah Akun:* `{inserted_count}` Akun Gmail\n"
+                f"📦 *Akun Baru Masuk:* `{inserted_count}` Akun\n"
+                f"📂 *Total Akun Pending Saat Ini:* `{len(all_pending_user_accounts)}` Akun\n"
                 f"═══════════════════════\n"
-                f"📄 *Data akun dikirim dalam bentuk file .txt di bawah ini.*"
+                f"📄 *File .txt ini berisi seluruh total akun pending user tersebut.*"
             )
 
-            txt_content = "\n".join([f"{g}:{p}" for g, p in successfully_inserted_accounts])
+            txt_content = "\n".join([f"{g}:{p}" for g, p in all_pending_user_accounts])
             txt_file = io.BytesIO(txt_content.encode('utf-8'))
             
             timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{mode_label}_{user.id}_{timestamp_file}.txt"
+            filename = f"setoran_{user.id}_{timestamp_file}.txt"
 
             try:
                 await context.bot.send_document(
@@ -1128,10 +1157,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         msg_response = ""
         if inserted_count > 0:
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM deposits WHERE user_id = %s AND status = 'PENDING'", (user.id,))
+            total_pending_count = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+
             msg_response += (
-                f"✅ *AKUN BERHASIL TERKIRIM!*\n\n"
-                f"📩 Total `{inserted_count}` akun Gmail telah diterima dan *menunggu persetujuan*.\n"
-                f"⏳ Saldo tertahan: *Rp {inserted_count * HARGA_PER_GMAIL:,}*\n"
+                f"✅ *AKUN BERHASIL TERKIRIM & DIARKIBKAN!*\n\n"
+                f"📩 Total `{inserted_count}` akun baru ditambahkan.\n"
+                f"📂 Total akumulasi akun pending Anda saat ini: `{total_pending_count}` akun.\n"
+                f"⏳ Saldo tertahan keseluruhan: *Rp {total_pending_count * HARGA_PER_GMAIL:,}*\n"
             )
         if duplicate_count > 0:
             msg_response += f"\n⚠️ `{duplicate_count}` akun ditolak otomatis karena sudah pernah dikirim sebelumnya."
@@ -1174,7 +1211,7 @@ if __name__ == '__main__':
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     print("Bot Setoran V28 Aktif (PostgreSQL Mode)...")
     app.run_polling()
