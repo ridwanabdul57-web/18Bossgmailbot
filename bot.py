@@ -381,6 +381,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         conn = sqlite3.connect('bot_database.db')
         cursor = conn.cursor()
+        # Query yang menjamin data setoran PENDING selalu ditarik permanen dari DB
         cursor.execute('''
             SELECT deposits.user_id, users.username, COUNT(*) 
             FROM deposits 
