@@ -1,4 +1,4 @@
-import io
+#import io
 import re
 import sqlite3
 import unicodedata
