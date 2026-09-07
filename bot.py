@@ -24,11 +24,19 @@ REJECT_REASONS = [
     "Format / Data Akun Tidak Valid"
 ]
 
-# ----------------- DATABASE SETUP & MIGRATION -----------------
+DB_NAME = 'bot_database.db'
+
+# ----------------- DATABASE SETUP & MIGRATION PERMANEN -----------------
+def get_db():
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")  # Memastikan data langsung tersimpan ke disk (Anti Loss)
+    return conn
+
 def init_db():
-    conn = sqlite3.connect('bot_database.db')
+    conn = get_db()
     cursor = conn.cursor()
     
+    # Tabel Users
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -37,6 +45,7 @@ def init_db():
         )
     ''')
     
+    # Tabel Deposits
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS deposits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +57,7 @@ def init_db():
         )
     ''')
     
+    # Tabel Withdrawals
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +71,7 @@ def init_db():
         )
     ''')
     
+    # Pengecekan Migrasi Kolom Aman
     cursor.execute("PRAGMA table_info(deposits)")
     columns = [column[1] for column in cursor.fetchall()]
     if 'created_at' not in columns:
@@ -70,10 +81,15 @@ def init_db():
     wd_columns = [column[1] for column in cursor.fetchall()]
     if 'atas_nama' not in wd_columns:
         cursor.execute("ALTER TABLE withdrawals ADD COLUMN atas_nama TEXT")
+
+    # Indeks agar query riwayat & pencarian user berjalan cepat & stabil
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dep_user ON deposits(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wd_user ON withdrawals(user_id)")
         
     conn.commit()
     conn.close()
 
+# Jalankan Inisialisasi Database
 init_db()
 
 # ----------------- KEYBOARD MENUS -----------------
@@ -136,7 +152,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     context.user_data.clear()
     
-    conn = sqlite3.connect('bot_database.db')
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user.id, user.username))
     conn.commit()
@@ -206,7 +222,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu_saldo":
         context.user_data.clear()
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         
         cursor.execute('SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = "APPROVED"', (user.id,))
@@ -235,7 +251,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu_riwayat":
         context.user_data.clear()
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = ? ORDER BY id DESC LIMIT 15', (user.id,))
         items = cursor.fetchall()
@@ -259,7 +275,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu_riwayat_wd":
         context.user_data.clear()
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT id, nominal, metode, rekening, atas_nama, status, created_at FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 10', (user.id,))
         wd_items = cursor.fetchall()
@@ -291,7 +307,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu_tarik":
         context.user_data.clear()
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user.id,))
         res = cursor.fetchone()
@@ -379,9 +395,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Akses khusus Admin!", show_alert=True)
             return
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
-        # Query yang menjamin data setoran PENDING selalu ditarik permanen dari DB
         cursor.execute('''
             SELECT deposits.user_id, users.username, COUNT(*) 
             FROM deposits 
@@ -415,7 +430,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Akses khusus Admin!", show_alert=True)
             return
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
             SELECT w.id, w.user_id, u.username, w.nominal, w.metode, w.rekening, w.atas_nama, w.created_at 
@@ -533,7 +548,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not target_uid:
             return
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM deposits WHERE user_id = ? AND status = "PENDING"', (target_uid,))
         all_items = [row[0] for row in cursor.fetchall()]
@@ -559,7 +574,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("⚠️ Belum ada akun yang dicentang!", show_alert=True)
             return
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         
         placeholders = ','.join(['?'] * len(selected_deps))
@@ -620,7 +635,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⚠️ Tidak ada akun terpilih.", reply_markup=back_keyboard())
             return
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         
         placeholders = ','.join(['?'] * len(selected_deps))
@@ -664,7 +679,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         wd_id = int(data.split('_')[1])
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT user_id, nominal, metode, rekening, atas_nama, status FROM withdrawals WHERE id = ?', (wd_id,))
         res = cursor.fetchone()
@@ -710,7 +725,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         wd_id = int(data.split('_')[1])
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT user_id, nominal, metode, rekening, atas_nama, status FROM withdrawals WHERE id = ?', (wd_id,))
         res = cursor.fetchone()
@@ -753,7 +768,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 async def render_admin_user_deposits(query, target_uid, context):
-    conn = sqlite3.connect('bot_database.db')
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute('SELECT id, gmail, password, created_at FROM deposits WHERE user_id = ? AND status = "PENDING"', (target_uid,))
     items = cursor.fetchall()
@@ -797,7 +812,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
     elif text == "📜 Daftar Setoran Saya":
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT gmail, status, created_at FROM deposits WHERE user_id = ? ORDER BY id DESC LIMIT 15', (user.id,))
         items = cursor.fetchall()
@@ -820,7 +835,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(pesan, reply_markup=back_keyboard(), parse_mode='Markdown')
         return
     elif text == "💰 Cek Saldo":
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = "APPROVED"', (user.id,))
         app_count = cursor.fetchone()[0]
@@ -884,7 +899,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
 
         success_count = 0
@@ -955,7 +970,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nominal = context.user_data.get('wd_nominal', 0)
         metode = context.user_data.get('wd_metode', '-')
 
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user.id,))
         res = cursor.fetchone()
@@ -1051,7 +1066,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             items_to_process = items_to_process[:MAX_BULK_LIMIT]
 
     if items_to_process:
-        conn = sqlite3.connect('bot_database.db')
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user.id, user.username))
         
@@ -1079,7 +1094,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             username_txt = f"@{user.username}" if user.username else "No Username"
             mode_label = "BULKING" if is_bulking_mode else "SATUAN"
             
-            # 1. Teks Notifikasi Pesan Singkat
             laporan_admin_text = (
                 f"📥 *SETORAN {mode_label} BARU MASUK*\n"
                 f"═══════════════════════\n"
@@ -1090,7 +1104,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📄 *Data akun dikirim dalam bentuk file .txt di bawah ini.*"
             )
 
-            # 2. Pembuatan File .txt dalam Memory
             txt_content = "\n".join([f"{g}:{p}" for g, p in successfully_inserted_accounts])
             txt_file = io.BytesIO(txt_content.encode('utf-8'))
             
@@ -1098,7 +1111,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             filename = f"{mode_label}_{user.id}_{timestamp_file}.txt"
 
             try:
-                # Kirim dokumen .txt beserta caption dan tombol ke Telegram Admin
                 await context.bot.send_document(
                     chat_id=ADMIN_CHAT_ID,
                     document=txt_file,
