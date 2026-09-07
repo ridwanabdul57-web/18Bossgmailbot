@@ -8,25 +8,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 
 BOT_TOKEN = '8966364905:AAEJKwW7MFa7rV0oI53gtxKUZEiuTHp0_5M'
 ADMIN_CHAT_ID = 8359903974         # ID Telegram Akun Utama / Admin
-CS_USERNAME = 'bossgmailbotcs'    # Username CS Telegram
-HARGA_PER_GMAIL = 4000             # Rp 4.000 / akun
-MAX_BULK_LIMIT = 50                # Batas maksimal akun per sekali setor bulking
-
-# Daftar Password yang Diizinkan untuk Bulking
-ALLOWED_BULK_PASSWORDS = ['fineirga', 'sgsg1122', 'prabujaya']
-
-# Daftar Alasan Reject untuk Admin
-REJECT_REASONS = [
-    "Password Salah / Tidak Sesuai Rules",
-    "Akun Terkena Bug / Captcha",
-    "Nomor HP Pemulihan Terverifikasi",
-    "Akun Terkena Sesi / Terkunci",
-    "Format / Data Akun Tidak Valid"
-]
-
-# ----------------- DATABASE SETUP & MIGRATION -----------------
-def init_db():
-    conn = sqlite3.connect('bot_database.db')
+CS_USERNAME = 'bossgmailbotcs'    # ##.connect('bot_database.db')
     cursor = conn.cursor()
     
     cursor.execute('''
